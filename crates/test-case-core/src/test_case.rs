@@ -46,6 +46,23 @@ impl TestCase {
         crate::utils::escape_test_name(case_desc)
     }
 
+    pub fn test_case_name_prehook(&self, test_case_name: &Ident) -> TokenStream2 {
+        if let Some(comment) = self.comment.as_ref() {
+            if let Some(expr) = comment.expression.as_ref() {
+                let assertion = if let TestCaseResult::Panicking(_) = expr.result {
+                    TokenStream2::new()
+                } else {
+                    expr.assertion()
+                };
+                return quote!(
+                    let _result = stringify!(#test_case_name);
+                    #assertion;
+                );
+            }
+        }
+        return quote! {};
+    }
+
     pub fn render(&self, mut item: ItemFn, origin_span: Span2) -> TokenStream2 {
         let item_name = item.sig.ident.clone();
         let arg_values = self.args.iter();
@@ -77,6 +94,8 @@ impl TestCase {
             )
         };
 
+        let test_case_name_prehook = self.test_case_name_prehook(&test_case_name);
+
         let expected = if let Some(expr) = self.expression.as_ref() {
             attrs.extend(expr.attributes());
 
@@ -96,6 +115,7 @@ impl TestCase {
         quote! {
             #(#attrs)*
             #signature {
+                #test_case_name_prehook
                 #body
                 #expected
             }

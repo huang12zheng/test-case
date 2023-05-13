@@ -1,10 +1,13 @@
 use syn::parse::{Parse, ParseStream};
 use syn::{LitStr, Token};
 
+use crate::expr::TestCaseExpression;
+
 #[derive(Debug)]
 pub struct TestCaseComment {
     _semicolon: Token![;],
     pub comment: LitStr,
+    pub expression: Option<TestCaseExpression>,
 }
 
 impl Parse for TestCaseComment {
@@ -12,6 +15,7 @@ impl Parse for TestCaseComment {
         Ok(Self {
             _semicolon: input.parse()?,
             comment: input.parse()?,
+            expression: input.parse().ok(),
         })
     }
 }
