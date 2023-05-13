@@ -89,3 +89,45 @@ fn render_test_cases(test_cases: &[(TestCase, Span2)], mut item: ItemFn) -> Toke
 
     output.into()
 }
+
+#[proc_macro_attribute]
+#[proc_macro_error::proc_macro_error]
+pub fn insta(args: TokenStream, input: TokenStream) -> TokenStream {
+    let mut test_case = parse_macro_input!(args as TestCase);
+    test_case.set_default_comment_expression();
+    let mut item = parse_macro_input!(input as ItemFn);
+
+    let mut test_cases = vec![(test_case, Span2::call_site())];
+    let mut attrs_to_remove = vec![];
+    let legal_test_case_names = [
+        parse_quote!(test_case),
+        parse_quote!(test_case::test_case),
+        parse_quote!(test_case::case),
+        parse_quote!(case),
+    ];
+
+    for (idx, attr) in item.attrs.iter().enumerate() {
+        if legal_test_case_names.contains(&attr.path) {
+            let mut test_case = match attr.parse_args::<TestCase>() {
+                Ok(test_case) => test_case,
+                Err(err) => {
+                    return syn::Error::new(
+                        attr.span(),
+                        format!("cannot parse test_case arguments: {err}"),
+                    )
+                    .to_compile_error()
+                    .into()
+                }
+            };
+            test_case.set_default_comment_expression();
+            test_cases.push((test_case, attr.span()));
+            attrs_to_remove.push(idx);
+        }
+    }
+
+    for i in attrs_to_remove.into_iter().rev() {
+        item.attrs.swap_remove(i);
+    }
+
+    render_test_cases(&test_cases, item)
+}

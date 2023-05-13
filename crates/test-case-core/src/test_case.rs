@@ -66,6 +66,12 @@ impl TestCase {
         return quote! {};
     }
 
+    pub fn set_default_comment_expression(&mut self) {
+        if let Some(comment) = self.comment.as_mut() {
+            comment.expression = Some(parse_quote! {=> ! set_snapshot_suffix });
+        }
+    }
+
     pub fn render(&self, mut item: ItemFn, origin_span: Span2) -> TokenStream2 {
         let item_name = item.sig.ident.clone();
         let arg_values = self.args.iter();
