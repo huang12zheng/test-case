@@ -101,9 +101,13 @@ pub fn insta(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut attrs_to_remove = vec![];
     let legal_test_case_names = [
         parse_quote!(test_case),
+        parse_quote!(case),
         parse_quote!(test_case::test_case),
         parse_quote!(test_case::case),
-        parse_quote!(case),
+        parse_quote!(insta),
+        parse_quote!(suffix),
+        parse_quote!(test_case::insta),
+        parse_quote!(test_case::suffix),
     ];
 
     for (idx, attr) in item.attrs.iter().enumerate() {
