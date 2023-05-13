@@ -2,6 +2,7 @@ use crate::complex_expr::ComplexTestCase;
 use crate::modifier::{parse_kws, Modifier};
 use crate::utils::fmt_syn;
 use crate::TokenStream2;
+use proc_macro2::Ident;
 use quote::ToTokens;
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -24,6 +25,20 @@ pub struct TestCaseExpression {
     pub extra_keywords: HashSet<Modifier>,
     pub result: TestCaseResult,
 }
+#[derive(Debug)]
+pub struct MacroExpression {
+    _token: Token![!],
+    pub result: Ident,
+}
+
+impl Parse for MacroExpression {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let _token = input.parse::<Token![!]>()?;
+        let result = input.parse::<Ident>()?;
+
+        Ok(MacroExpression { _token, result })
+    }
+}
 
 #[derive(Debug)]
 pub enum TestCaseResult {
@@ -41,6 +56,8 @@ pub enum TestCaseResult {
     UseFn(Expr),
     // test_case(a, b, c => is close to 4 precision 0.1)
     Complex(ComplexTestCase),
+    // test_case(a, b, c => ! assert)
+    CommentMacro(MacroExpression),
 }
 
 impl Parse for TestCaseExpression {
@@ -72,10 +89,10 @@ impl Parse for TestCaseExpression {
         } else if input.parse::<kw::panics>().is_ok() {
             parse_with_keyword_ok::<_, _>(input, token, extra_keywords, TestCaseResult::Panicking)
         } else {
-            let result = match input.parse::<Expr>() {
-                Ok(expr) => TestCaseResult::Simple(expr),
+            let result = match raw_parse(input) {
+                Ok(result) => result,
                 Err(_) if !extra_keywords.is_empty() => TestCaseResult::Empty,
-                Err(e) => return Err(e),
+                Err(e) => panic!("{e}"),
             };
 
             Ok(Self {
@@ -85,6 +102,19 @@ impl Parse for TestCaseExpression {
             })
         }
     }
+}
+
+fn raw_parse(input: &syn::parse::ParseBuffer) -> Result<TestCaseResult, String> {
+    if let Ok(expr) = input.clone().parse::<MacroExpression>() {
+        return Ok(TestCaseResult::CommentMacro(expr));
+    }
+    if let Ok(expr) = input.clone().parse::<Expr>() {
+        return Ok(TestCaseResult::Simple(expr));
+    }
+    Err(format!(
+        "can't parse for TestCaseExpression with{}",
+        input.to_string()
+    ))
 }
 
 impl Display for TestCaseExpression {
@@ -112,6 +142,7 @@ impl Display for TestCaseResult {
             TestCaseResult::UseFn(expr) => write!(f, "use {}", fmt_syn(expr)),
             TestCaseResult::Complex(complex) => write!(f, "complex {complex}"),
             TestCaseResult::Empty => write!(f, "empty"),
+            TestCaseResult::CommentMacro(expr) => write!(f, "{}", expr.result),
         }
     }
 }
@@ -146,6 +177,11 @@ impl TestCaseExpression {
             TestCaseResult::UseFn(path) => parse_quote! { #path(_result) },
             TestCaseResult::Complex(complex) => complex.assertion(),
             TestCaseResult::Empty => TokenStream2::new(),
+            TestCaseResult::CommentMacro(expr) => {
+                let ident = expr.result.clone();
+                // add ! in parent
+                parse_quote!(#ident)
+            }
         }
     }
 

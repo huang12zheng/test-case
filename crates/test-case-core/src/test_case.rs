@@ -5,7 +5,7 @@ use proc_macro2::{Span as Span2, TokenStream as TokenStream2};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{parse_quote, Error, Expr, Ident, ItemFn, Token};
+use syn::{parse_quote, Error, Expr, Ident, ItemFn, LitStr, Token};
 
 #[derive(Debug)]
 pub struct TestCase {
@@ -46,18 +46,21 @@ impl TestCase {
         crate::utils::escape_test_name(case_desc)
     }
 
-    pub fn test_case_name_prehook(&self, test_case_name: &Ident) -> TokenStream2 {
+    pub fn test_case_name_prehook(&self) -> TokenStream2 {
         if let Some(comment) = self.comment.as_ref() {
             if let Some(expr) = comment.expression.as_ref() {
-                let assertion = if let TestCaseResult::Panicking(_) = expr.result {
-                    TokenStream2::new()
-                } else {
-                    expr.assertion()
+                return match expr.result {
+                    TestCaseResult::Panicking(_) => TokenStream2::new(),
+                    TestCaseResult::CommentMacro(_) => {
+                        let assertion = expr.assertion();
+                        let test_case_name: LitStr = comment.comment.clone();
+
+                        return quote!(
+                            #assertion!(#test_case_name);
+                        );
+                    }
+                    _ => return quote!(expr.assertion()),
                 };
-                return quote!(
-                    let _result = stringify!(#test_case_name);
-                    #assertion;
-                );
             }
         }
         return quote! {};
@@ -94,7 +97,7 @@ impl TestCase {
             )
         };
 
-        let test_case_name_prehook = self.test_case_name_prehook(&test_case_name);
+        let test_case_name_prehook = self.test_case_name_prehook();
 
         let expected = if let Some(expr) = self.expression.as_ref() {
             attrs.extend(expr.attributes());
