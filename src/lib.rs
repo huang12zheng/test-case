@@ -1,16 +1,20 @@
+mod trait_item_type;
+
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use std::borrow::Cow;
 use syn::ext::IdentExt;
 use syn::parse::{Nothing, Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{
-    parse_macro_input, Attribute, FnArg, Ident, ImplItem, ImplItemConst, ImplItemMethod,
-    ImplItemType, ItemImpl, Pat, PatBox, PatIdent, PatReference, PatTuple, PatType, Signature,
-    Visibility,
+    parse_macro_input, parse_quote, Attribute, FnArg, Generics, Ident, ImplItem, ImplItemConst,
+    ImplItemFn, ImplItemType, ItemImpl, Pat, PatIdent, PatReference, PatTuple, PatType, Receiver,
+    Signature, Visibility,
 };
+
+use crate::trait_item_type::ImplItemBound;
 
 struct ItemImplWithVisibility {
     attrs: Vec<Attribute>,
@@ -65,42 +69,124 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
         items,
         ..
     } = &impl_item;
-    let items = items.iter().map(|item| match item {
-        ImplItem::Const(ImplItemConst {
-            attrs, ident, ty, ..
-        }) => quote! { #(#attrs)* const #ident: #ty; },
-        ImplItem::Method(ImplItemMethod { attrs, sig: Signature {
-            constness, asyncness, unsafety, abi, ident, generics, inputs, variadic, output, ..
-        }, .. }) => {
-            let inputs = inputs.into_iter().map(|arg| {
-                let span = arg.span();
-                match arg {
-                    FnArg::Typed(PatType { attrs, pat, ty, .. }) => {
-                        let ident = extract_ident(pat).unwrap_or_else(|| Cow::Owned(Ident::new("_", span)));
-                        quote! { #(#attrs)* #ident: #ty }
-                    },
-                    FnArg::Receiver(_) => quote! { #arg }
+    let trait_items = items.iter().map(|item| {
+
+        match item {
+            ImplItem::Const(ImplItemConst {
+                attrs,
+                vis: _,
+                defaultness: None,
+                const_token,
+                ident,
+                generics: Generics {
+                    lt_token: None,
+                    params: _,
+                    gt_token: None,
+                    where_clause: None,
+                },
+                colon_token,
+                ty,
+                eq_token: _,
+                expr: _,
+                semi_token,
+            }) => {
+                quote! { #(#attrs)* #const_token #ident #colon_token #ty #semi_token }
+            },
+            ImplItem::Fn(ImplItemFn {
+                attrs,
+                vis: _,
+                defaultness: None,
+                sig: Signature {
+                    constness,
+                    asyncness,
+                    unsafety,
+                    abi,
+                    fn_token,
+                    ident,
+                    generics,
+                    paren_token: _,
+                    inputs,
+                    variadic,
+                    output
+                },
+                block: _,
+            }) => {
+                let inputs = inputs.into_iter().map(|arg| {
+                    let span = arg.span();
+                    match arg {
+                        FnArg::Typed(PatType { attrs, pat, colon_token, ty }) => {
+                            let ident = extract_ident(pat).unwrap_or_else(|| Cow::Owned(Ident::new("_", span)));
+                            quote! { #(#attrs)* #ident #colon_token #ty }
+                        },
+                        FnArg::Receiver(Receiver {
+                            attrs,
+                            reference: None,
+                            mutability: _,
+                            self_token,
+                            colon_token: Some(colon),
+                            ty,
+                        }) => quote! { #(#attrs)* #self_token #colon #ty },
+                        FnArg::Receiver(receiver) => receiver.into_token_stream(),
+                    }
+                });
+                let where_clause = &generics.where_clause;
+                quote! {
+                    #(#attrs)*
+                    #constness #asyncness #unsafety #abi #fn_token #ident #generics (#(#inputs,)* #variadic) #output #where_clause;
                 }
-            });
-            let where_clause = &generics.where_clause;
-            quote! {
-                #(#attrs)*
-                #constness #asyncness #unsafety #abi fn #ident #generics (#(#inputs,)* #variadic) #output #where_clause;
-            }
-        },
-        ImplItem::Type(ImplItemType {
-            attrs,
-            ident,
-            generics,
-            ..
-        }) => quote! { #(#attrs)* type #ident #generics; },
-        _ => syn::Error::new(item.span(), "unsupported item type").to_compile_error(),
+            },
+            ImplItem::Type(ImplItemType {
+                attrs,
+                type_token,
+                ident,
+                generics,
+                semi_token,
+                ..
+            }) => {
+                quote! { #(#attrs)* #type_token #ident #generics #semi_token }
+            },
+                ImplItem::Verbatim(ts) => {
+                    let ImplItemBound {
+                        attrs,
+                        type_token,
+                        ident,
+                        generics,
+                        semi_token,
+                        colon_token,
+                        bounds,
+                        ..
+                    }= parse_quote!(#ts);
+                    quote! { #(#attrs)* #type_token #ident #generics #colon_token #bounds #semi_token}
+                },
+            _ => syn::Error::new(item.span(), format!("unsupported item type {}",item.to_token_stream())).to_compile_error(),
+        }
     });
+    let impl_items = items.iter().map(|item| match item {
+        ImplItem::Verbatim(ts) => {
+            let ImplItemBound {
+                attrs,
+                type_token,
+                ident,
+                generics,
+                semi_token,
+                eq_token,
+                expr,
+                ..
+            } = parse_quote!(#ts);
+            let new_item: ImplItem =
+                parse_quote! { #(#attrs)* #type_token #ident #generics #eq_token #expr #semi_token};
+            new_item
+        }
+        _v => _v.clone(),
+    });
+    let mut impl_item = impl_item.clone();
+    impl_item.items = impl_items.collect();
+
     if let Some((None, path, _)) = trait_ {
         (quote! {
             #(#attrs)*
             #visibility #unsafety trait #path {
-                #(#items)*
+                #(#trait_items)*
             }
             #impl_item
         })
@@ -114,9 +200,7 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
 
 fn extract_ident(pat: &Pat) -> Option<Cow<'_, Ident>> {
     match pat {
-        Pat::Box(PatBox { pat, .. }) | Pat::Reference(PatReference { pat, .. }) => {
-            extract_ident(pat)
-        }
+        Pat::Reference(PatReference { pat, .. }) => extract_ident(pat),
         Pat::Ident(PatIdent { ident, .. }) => Some(Cow::Borrowed(ident)),
         Pat::Tuple(PatTuple { elems, .. }) => {
             if elems.len() <= 1 {
