@@ -216,6 +216,7 @@ struct X {
 
 #[extension_trait]
 impl StructPattern for i32 {
+    #[intrait]
     fn x(X { a, b }: X) -> i32 {
         a + b
     }

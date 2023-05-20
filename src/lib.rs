@@ -92,7 +92,8 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
             }) => {
                 quote! { #(#attrs)* #const_token #ident #colon_token #ty #semi_token }
             },
-            ImplItem::Fn(ImplItemFn {
+            ImplItem::Fn(
+               impl_item_fn @ImplItemFn {
                 attrs,
                 vis: _,
                 defaultness: None,
@@ -129,10 +130,20 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
                         FnArg::Receiver(receiver) => receiver.into_token_stream(),
                     }
                 });
-                let where_clause = &generics.where_clause;
-                quote! {
-                    #(#attrs)*
-                    #constness #asyncness #unsafety #abi #fn_token #ident #generics (#(#inputs,)* #variadic) #output #where_clause;
+                let new_attrs:Vec<Attribute> = attrs.iter().filter(|a| !a.to_token_stream().to_string().contains("intrait")).cloned().collect();
+                let is_in_trait =new_attrs.len()<attrs.len();
+                if is_in_trait{
+                    let mut impl_item_fn = impl_item_fn.clone();
+                    impl_item_fn.attrs = new_attrs;
+                    quote!{
+                        #impl_item_fn
+                    }
+                }else{
+                    let where_clause = &generics.where_clause;
+                    quote! {
+                        #(#new_attrs)*
+                        #constness #asyncness #unsafety #abi #fn_token #ident #generics (#(#inputs,)* #variadic) #output #where_clause;
+                    }
                 }
             },
             ImplItem::Type(ImplItemType {
@@ -161,7 +172,41 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
             _ => syn::Error::new(item.span(), format!("unsupported item type {}",item.to_token_stream())).to_compile_error(),
         }
     });
-    let impl_items = items.iter().map(|item| match item {
+    let impl_items = items.iter().filter_map(|item| match item {
+        ImplItem::Fn(
+            impl_item_fn @ ImplItemFn {
+                attrs,
+                vis: _,
+                defaultness: None,
+                sig:
+                    Signature {
+                        constness,
+                        asyncness,
+                        unsafety,
+                        abi,
+                        fn_token,
+                        ident,
+                        generics,
+                        paren_token: _,
+                        inputs,
+                        variadic,
+                        output,
+                    },
+                block: _,
+            },
+        ) => {
+            let new_attrs: Vec<Attribute> = attrs
+                .iter()
+                .filter(|a| !a.to_token_stream().to_string().contains("intrait"))
+                .cloned()
+                .collect();
+            let is_in_trait = new_attrs.len() < attrs.len();
+            if !is_in_trait {
+                Some(item.clone())
+            } else {
+                None
+            }
+        }
         ImplItem::Verbatim(ts) => {
             let ImplItemBound {
                 attrs,
@@ -175,9 +220,9 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
             } = parse_quote!(#ts);
             let new_item: ImplItem =
                 parse_quote! { #(#attrs)* #type_token #ident #generics #eq_token #expr #semi_token};
-            new_item
+            Some(new_item)
         }
-        _v => _v.clone(),
+        _v => Some(_v.clone()),
     });
     let mut impl_item = impl_item.clone();
     impl_item.items = impl_items.collect();
