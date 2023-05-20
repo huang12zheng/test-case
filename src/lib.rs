@@ -173,28 +173,7 @@ pub fn extension_trait(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     });
     let impl_items = items.iter().filter_map(|item| match item {
-        ImplItem::Fn(
-            impl_item_fn @ ImplItemFn {
-                attrs,
-                vis: _,
-                defaultness: None,
-                sig:
-                    Signature {
-                        constness,
-                        asyncness,
-                        unsafety,
-                        abi,
-                        fn_token,
-                        ident,
-                        generics,
-                        paren_token: _,
-                        inputs,
-                        variadic,
-                        output,
-                    },
-                block: _,
-            },
-        ) => {
+        ImplItem::Fn(_impl_item_fn @ ImplItemFn { attrs, .. }) => {
             let new_attrs: Vec<Attribute> = attrs
                 .iter()
                 .filter(|a| !a.to_token_stream().to_string().contains("intrait"))
